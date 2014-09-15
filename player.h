@@ -28,6 +28,7 @@ struct s_running_game
 struct s_game_info
 {
 	enum e_player_state state;
+	int rank;
 	int gold;
 	int dust;
 	struct s_game *game;
@@ -55,8 +56,6 @@ struct s_card
 	int life;
 	struct list_head list;
 };
-
-
 
 
 

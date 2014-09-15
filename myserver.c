@@ -47,10 +47,13 @@ pthread_t find_game_tid;
 pthread_mutex_t fgqlock=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t fgqlock_ready=PTHREAD_COND_INITIALIZER;
 
-LIST_HEAD(find_game_queue);
+struct list_head find_game_hqueue[20];
 LIST_HEAD(game_list);
+LIST_HEAD(find_game_queue);
 
-int find_game_list_num;
+int find_game_hlist_num=0;
+int find_game_list_num=0;
+
 
 void *find_game_run(void *arg)
 {
@@ -61,34 +64,47 @@ void *find_game_run(void *arg)
 	for(;;)
 	{
 		pthread_mutex_lock(&fgqlock);
-		if(list_empty(&find_game_queue)||find_game_list_num<2)
+		if(find_game_hlist_num<2)
 			pthread_cond_wait(&fgqlock_ready,&fgqlock);
-		int i;
-		for(i=0;i<2;i++)
-		{
-			pos=(&find_game_queue)->next;
-			p_player[i]=list_entry(pos,struct find_game_player,list);
-			list_del((&find_game_queue)->next);
-			find_game_list_num--;
-		}
+		int i,j;
+
+		for(i=0;i<20;i++)	
+			{		
+			list_splice(&find_game_hqueue[i],&find_game_queue);	
+			}
+		find_game_list_num=find_game_hlist_num;
+		find_game_hlist_num=0;
+
 		pthread_mutex_unlock(&fgqlock);
+
+		while(find_game_list_num>1)
+			{
+			for(j=0;j<2;j++)
+				{
+				pos=(&find_game_queue)->next;
+				p_player[j]=list_entry(pos,struct find_game_player,list);
+				list_del((&find_game_queue)->next);
+				find_game_list_num--;
+				}
 	
-		p_game=(struct s_game*)malloc(sizeof(struct s_game));
-		p_game->player1=p_player[0]->player;
-		p_game->player2=p_player[1]->player;
-		list_add_tail(&p_game->list,&game_list);
+			p_game=(struct s_game*)malloc(sizeof(struct s_game));
+			p_game->player1=p_player[0]->player;
+			p_game->player2=p_player[1]->player;
+			list_add_tail(&p_game->list,&game_list);
 		
-		free(p_player[0]);
-		free(p_player[1]);
+			free(p_player[0]);
+			free(p_player[1]);
 
-		p_game->player1->game_info.game=p_game;
-		p_game->player2->game_info.game=p_game;
-
-		printf("create game: %s and %s at %d\n",p_game->player1->conn_info.username,p_game->player2->conn_info.username,p_game);
-		fflush(stdout);
+			p_game->player1->game_info.game=p_game;
+			p_game->player2->game_info.game=p_game;
+	
+			printf("create game: %s and %s at %d\n",p_game->player1->conn_info.username,p_game->player2->conn_info.username,p_game);
+			fflush(stdout);
 		
-		//init game
-		init_game(p_game);
+			//init game
+			init_game(p_game);
+			}
+		
 	}
 }
 
@@ -109,6 +125,10 @@ void do_login(struct s_player *p_player)
 	strcpy(p_player->conn_info.username,((struct s_login_msg*)p_buf)->username);
 	printf("username: %s \n",p_player->conn_info.username);
 	p_player->game_info.state=main_menu;
+	p_player->game_info.gold=0;
+	p_player->game_info.dust=0;
+	p_player->game_info.rank=10;
+	
 }
 
 void do_begin_find_game(struct s_player *p_player)
@@ -118,10 +138,10 @@ void do_begin_find_game(struct s_player *p_player)
 	p->player=p_player;
 
 	pthread_mutex_lock(&fgqlock);
-	list_add_tail(&p->list,&find_game_queue);
-	find_game_list_num++;
+	list_add_tail(&p->list,&find_game_hqueue[p->player->game_info.rank]);
+	find_game_hlist_num++;
 	pthread_mutex_unlock(&fgqlock);
-	if(find_game_list_num>1)
+	if(find_game_hlist_num>1)
 		pthread_cond_signal(&fgqlock_ready);
 
 	printf("username: %s begin find game.. \n",p_player->conn_info.username);
@@ -219,7 +239,12 @@ int main(int argc,char* argv[])			//主函数为带命令行参数的函数，�
 		bail("malloc");
 
 	//run find game thread
+	int i;
 	pthread_create(&find_game_tid,NULL,find_game_run,NULL);
+	for(i=0;i<20;i++)	
+		{	
+		INIT_LIST_HEAD(&find_game_hqueue[i]);	
+		}
 
 
 	printf("Server is waiting for acceptance of new client\n");
